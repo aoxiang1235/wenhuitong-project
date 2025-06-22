@@ -26,11 +26,13 @@ const Chat = () => {
     const [useStreaming, setUseStreaming] = useState(true);
     const [useTokenCounting, setUseTokenCounting] = useState(true);
     const [tokenStats, setTokenStats] = useState(null);
-    const [streamingStats, setStreamingStats] = useState(null);
-    const [tokenMethod, setTokenMethod] = useState('local'); // local, api, tiktoken
     const chatWindowRef = useRef(null);
     const abortControllerRef = useRef(null);
     const encoderRef = useRef(null);
+    const [sessionTopic, setSessionTopic] = useState('');
+    const topicRequestId = useRef(0);
+    const [sessions, setSessions] = useState([]); // 历史会话
+    const [currentSessionId, setCurrentSessionId] = useState(Date.now());
 
     // 初始化js-tiktoken编码器
     useEffect(() => {
@@ -57,45 +59,6 @@ const Chat = () => {
         };
     }, []);
 
-    // Token估算函数，支持多种方法
-    const estimateTokens = async (text) => {
-        if (!text) return 0;
-        
-        // 方法1: 使用js-tiktoken（免费且较准确）
-        if (tokenMethod === 'tiktoken' && tiktokenAvailable && encoderRef.current) {
-            try {
-                return encoderRef.current.encode(text).length;
-            } catch (error) {
-                console.warn('TikToken estimation failed:', error);
-            }
-        }
-        
-        // 方法2: 调用后端API（有费用但最准确）
-        if (tokenMethod === 'api') {
-            try {
-                const response = await fetch('http://localhost:8000/api/tokenize/', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text, method: 'api' }),
-                });
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    return data.token_count;
-                }
-            } catch (error) {
-                console.warn('API tokenization failed:', error);
-            }
-        }
-        
-        // 方法3: 本地简单估算（免费但不够精确）
-        const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
-        const englishWords = (text.match(/[a-zA-Z]+/g) || []).length;
-        const otherChars = text.length - chineseChars - englishWords;
-        
-        return Math.ceil(chineseChars + englishWords * 1.3 + otherChars * 0.5);
-    };
-
     const scrollToBottom = () => {
         if (chatWindowRef.current) {
             chatWindowRef.current.scrollTop = chatWindowRef.current.scrollHeight;
@@ -110,23 +73,48 @@ const Chat = () => {
         if (abortControllerRef.current) {
             abortControllerRef.current.abort();
             setIsStreaming(false);
-            setStreamingStats(null);
         }
     };
+
+    const generateTopic = async (msgs) => {
+        const currentRequestId = ++topicRequestId.current;
+        try {
+            const response = await fetch('http://localhost:8000/api/generate_topic/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages: msgs }),
+            });
+            if (response.ok) {
+                const data = await response.json();
+                if (currentRequestId === topicRequestId.current) {
+                    setSessionTopic(data.topic);
+                }
+            }
+        } catch {
+            // 可忽略错误
+        }
+    };
+
+    // 只在第一条消息后生成主题
+    useEffect(() => {
+        if (messages.length === 1) {
+            generateTopic(messages);
+        }
+    }, [messages]);
 
     const handleSend = async () => {
         if (input.trim()) {
             setIsStreaming(true);
             setTokenStats(null);
-            setStreamingStats(null);
-            const userMessage = { text: input, sender: 'user' };
-            setMessages(prevMessages => [...prevMessages, userMessage]);
+            const userMessage = { text: input, sender: 'user', timestamp: Date.now() };
+            const newMessages = [...messages, userMessage];
+            setMessages(newMessages);
             const currentInput = input;
             setInput('');
 
             if (useStreaming) {
                 abortControllerRef.current = new AbortController();
-                let botMessageAccumulator = { text: '', sender: 'bot' };
+                let botMessageAccumulator = { text: '', sender: 'bot', timestamp: Date.now() };
                 let botMessageIndex = -1;
 
                 try {
@@ -151,32 +139,15 @@ const Chat = () => {
                         onmessage: (event) => {
                             try {
                                 const data = JSON.parse(event.data);
-                                
                                 if (event.event === 'message') {
-                                    // 处理文本消息
                                     botMessageAccumulator.text += data.text;
-                                    setMessages(prev => prev.map((msg, idx) => 
-                                        idx === botMessageIndex ? { ...botMessageAccumulator } : msg
-                                    ));
-                                } else if (event.event === 'token_info') {
-                                    // 处理Token统计信息
-                                    if (data.type === 'input') {
-                                        setStreamingStats({
-                                            input_tokens: data.input_tokens,
-                                            output_tokens: 0,
-                                            total_tokens: data.input_tokens,
-                                            is_estimate: false,
-                                            method: 'dashscope'
-                                        });
-                                    } else if (data.type === 'progress' || data.type === 'final') {
-                                        setStreamingStats({
-                                            input_tokens: data.input_tokens || streamingStats?.input_tokens || 0,
-                                            output_tokens: data.output_tokens,
-                                            total_tokens: data.total_tokens,
-                                            is_estimate: false,
-                                            method: 'dashscope'
-                                        });
-                                    }
+                                    botMessageAccumulator.timestamp = Date.now();
+                                    setMessages(prev => {
+                                        const updated = prev.map((msg, idx) =>
+                                            idx === botMessageIndex ? { ...botMessageAccumulator, prompt_tokens: data.prompt_tokens, completion_tokens: data.completion_tokens, total_tokens: data.total_tokens } : msg
+                                        );
+                                        return updated;
+                                    });
                                 }
                             } catch (error) {
                                 console.error('解析消息错误:', error);
@@ -184,23 +155,16 @@ const Chat = () => {
                         },
                         onclose: () => {
                             setIsStreaming(false);
-                            // 流式结束后，将统计转换为最终统计
-                            if (streamingStats) {
-                                setTokenStats(streamingStats);
-                                setStreamingStats(null);
-                            }
                         },
                         onerror: (err) => {
                             console.error('流式请求错误:', err);
                             setIsStreaming(false);
-                            setStreamingStats(null);
                         }
                     });
                 } catch (error) {
                     console.error('发送请求错误:', error);
-                    setMessages(prev => [...prev, { text: "抱歉，连接出错了。", sender: 'bot' }]);
+                    setMessages(prev => [...prev, { text: "抱歉，连接出错了。", sender: 'bot', timestamp: Date.now() }]);
                     setIsStreaming(false);
-                    setStreamingStats(null);
                 }
             } else {
                 try {
@@ -216,110 +180,201 @@ const Chat = () => {
 
                     if (response.ok) {
                         const data = await response.json();
-                        setMessages(prev => [...prev, { text: data.text, sender: 'bot' }]);
-                        setTokenStats(data.stats);
+                        setMessages(prev => {
+                            const updated = [...prev];
+                            // 直接读取根级token字段
+                            const promptTokens = data.prompt_tokens;
+                            const completionTokens = data.completion_tokens;
+                            const totalTokens = data.total_tokens;
+                            // 给最后一条用户消息加上 prompt_tokens
+                            if (promptTokens !== undefined) {
+                                updated[updated.length - 1] = {
+                                    ...updated[updated.length - 1],
+                                    prompt_tokens: promptTokens
+                                };
+                            }
+                            // bot消息
+                            const botMsg = {
+                                text: data.text,
+                                sender: 'bot',
+                                timestamp: Date.now(),
+                                prompt_tokens: promptTokens,
+                                completion_tokens: completionTokens,
+                                total_tokens: totalTokens
+                            };
+                            return [...updated, botMsg];
+                        });
                     } else {
-                        setMessages(prev => [...prev, { text: "抱歉，服务出错了。", sender: 'bot' }]);
+                        setMessages(prev => [...prev, { text: "抱歉，服务出错了。", sender: 'bot', timestamp: Date.now() }]);
                     }
                 } catch (error) {
                     console.error('非流式请求错误:', error);
-                    setMessages(prev => [...prev, { text: "抱歉，连接出错了。", sender: 'bot' }]);
+                    setMessages(prev => [...prev, { text: "抱歉，连接出错了。", sender: 'bot', timestamp: Date.now() }]);
                 }
                 setIsStreaming(false);
             }
         }
     };
 
-    const getMethodDisplay = (method) => {
-        switch (method) {
-            case 'tiktoken': return 'TikToken (免费)';
-            case 'api': return '官方API (收费)';
-            case 'local': return '本地估算 (免费)';
-            default: return method;
+    // 新建会话函数
+    const handleNewSession = () => {
+        // 保存当前会话
+        if (messages.length > 0 || sessionTopic) {
+            setSessions(prev => [
+                ...prev,
+                {
+                    id: currentSessionId,
+                    topic: sessionTopic || '未命名会话',
+                    messages,
+                    createdAt: new Date().toISOString()
+                }
+            ]);
+        }
+        // 清空当前会话
+        setMessages([]);
+        setSessionTopic('');
+        setTokenStats(null);
+        setInput('');
+        const newId = Date.now();
+        setCurrentSessionId(newId);
+    };
+
+    const handleSwitchSession = (id) => {
+        // 保存当前会话
+        if (messages.length > 0 || sessionTopic) {
+            setSessions(prev => prev.map(s =>
+                s.id === currentSessionId
+                    ? { ...s, messages, topic: sessionTopic }
+                    : s
+            ));
+        }
+        // 加载目标会话
+        const target = sessions.find(s => s.id === id);
+        if (target) {
+            setMessages(target.messages);
+            setSessionTopic(target.topic);
+            setCurrentSessionId(id);
         }
     };
 
+    // 删除会话
+    const handleDeleteSession = (id, e) => {
+        e.stopPropagation(); // 防止触发切换
+        setSessions(prev => prev.filter(s => s.id !== id));
+    };
+
     return (
-        <div className="chat-container">
-            <div className="chat-window" ref={chatWindowRef}>
-                {messages.length === 0 && (
-                    <div className="welcome-message">
-                        欢迎使用AI聊天助手！请输入您的问题。
-                    </div>
-                )}
-                {messages.map((msg, index) => (
-                    <div key={index} className={`message ${msg.sender}`}>
-                        {msg.text}
+        <div style={{ display: 'flex' }}>
+            {/* 左侧会话栏 */}
+            <div className="sidebar">
+                {sessions.map(session => (
+                    <div
+                        key={session.id}
+                        className={`session-item${session.id === currentSessionId ? ' active' : ''}`}
+                        onClick={() => handleSwitchSession(session.id)}
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                    >
+                        <span>{session.topic}</span>
+                        <button
+                            className="delete-session-btn"
+                            onClick={e => handleDeleteSession(session.id, e)}
+                            title="删除会话"
+                        >✕</button>
                     </div>
                 ))}
             </div>
-            
-            {/* 实时流式统计 */}
-            {streamingStats && (
-                <div className="token-stats streaming">
-                    <div className="stats-content">
-                        输入: {streamingStats.input_tokens} tokens | 输出: {streamingStats.output_tokens} tokens | 总计: {streamingStats.total_tokens} tokens
-                    </div>
-                    <div className="stats-note">
-                        <span className="pulse">●</span> 实时统计中...
-                        <span className="method-badge">{streamingStats.method === 'dashscope' ? 'DashScope (准确)' : '估算'}</span>
-                    </div>
+            {/* 主内容区 */}
+            <div className="chat-container" style={{ marginLeft: 220 }}>
+                {/* 新建会话按钮 */}
+                <div style={{ textAlign: 'right', marginBottom: 8 }}>
+                    <button className="new-session-btn" onClick={handleNewSession}>新建会话</button>
                 </div>
-            )}
-            
-            {/* 最终统计（非流式或流式结束后） */}
-            {tokenStats && !streamingStats && (
-                <div className="token-stats">
-                    <div className="stats-content">
-                        输入: {tokenStats.input_tokens} tokens | 输出: {tokenStats.output_tokens} tokens | 总计: {tokenStats.total_tokens} tokens
-                    </div>
-                    {tokenStats.is_estimate ? (
-                        <div className="stats-note">
-                            <span className="estimate-icon">ℹ</span> 估算值，仅供参考
-                        </div>
-                    ) : (
-                        <div className="stats-note">
-                            <span className="official-icon">✓</span> 官方统计
+                {sessionTopic && (
+                    <div className="session-topic">主题：{sessionTopic}</div>
+                )}
+                {/* 新增总token统计 */}
+                <div className="total-tokens">
+                    本会话总Token消耗：{
+                        messages
+                            .filter(msg => msg.sender === 'bot' && typeof msg.total_tokens === 'number')
+                            .reduce((sum, msg) => sum + msg.total_tokens, 0)
+                    }
+                </div>
+                <div className="chat-window" ref={chatWindowRef}>
+                    {messages.length === 0 && (
+                        <div className="welcome-message">
+                            欢迎使用AI聊天助手！请输入您的问题。
                         </div>
                     )}
+                    {messages.map((msg, index) => (
+                        <div key={index} className={`message-wrapper`}>
+                            <div className={`message ${msg.sender}`}>
+                                {msg.text}
+                            </div>
+                            <div className="msg-meta">
+                                {msg.timestamp && (
+                                    <span className="msg-time">{new Date(msg.timestamp).toLocaleString()}</span>
+                                )}
+                                {/* 用户消息下展示输入token */}
+                                {msg.sender === 'user' && msg.prompt_tokens !== undefined && (
+                                    <span className="msg-tokens">输入: {msg.prompt_tokens}</span>
+                                )}
+                                {/* bot消息下展示输入/输出/总计token */}
+                                {msg.sender === 'bot' && (msg.prompt_tokens !== undefined || msg.completion_tokens !== undefined || msg.total_tokens !== undefined) && (
+                                    <span className="msg-tokens">
+                                        输入: {msg.prompt_tokens !== undefined ? msg.prompt_tokens : '-'}
+                                        &nbsp;输出: {msg.completion_tokens !== undefined ? msg.completion_tokens : '-'}
+                                        &nbsp;总计: {msg.total_tokens !== undefined ? msg.total_tokens : '-'}
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                    ))}
                 </div>
-            )}
-            
-            <div className="controls">
-                <label>
-                    <input 
-                        type="checkbox" 
-                        checked={useStreaming} 
-                        onChange={(e) => setUseStreaming(e.target.checked)}
-                        disabled={isStreaming}
-                    />
-                    流式响应
-                </label>
                 
-                <label>
-                    <input 
-                        type="checkbox" 
-                        checked={useTokenCounting} 
-                        onChange={(e) => setUseTokenCounting(e.target.checked)}
+                {tokenStats && (
+                    <div className="token-stats">
+                        <div className="stats-content">
+                            输入: {tokenStats.prompt_tokens} tokens | 输出: {tokenStats.completion_tokens} tokens | 总计: {tokenStats.total_tokens} tokens
+                        </div>
+                        {tokenStats.is_estimate ? (
+                            <div className="stats-note">
+                                <span className="estimate-icon">ℹ</span> 估算值，仅供参考
+                            </div>
+                        ) : (
+                            <div className="stats-note">
+                                <span className="official-icon">✓</span> 官方统计
+                            </div>
+                        )}
+                    </div>
+                )}
+                
+                <div className="controls">
+                    <label>
+                        <input 
+                            type="checkbox" 
+                            checked={useStreaming} 
+                            onChange={(e) => setUseStreaming(e.target.checked)}
+                            disabled={isStreaming}
+                        />
+                        流式响应
+                    </label>
+                </div>
+                <div className="chat-input">
+                    <input
+                        type="text"
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyPress={(e) => !isStreaming && e.key === 'Enter' && handleSend()}
+                        placeholder="输入消息..."
                         disabled={isStreaming}
                     />
-                    Token统计
-                </label>
-            </div>
-            <div className="chat-input">
-                <input
-                    type="text"
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyPress={(e) => !isStreaming && e.key === 'Enter' && handleSend()}
-                    placeholder="输入消息..."
-                    disabled={isStreaming}
-                />
-                {isStreaming ? (
-                    <button onClick={handleStop} className="stop-button">停止</button>
-                ) : (
-                    <button onClick={handleSend}>发送</button>
-                )}
+                    {isStreaming ? (
+                        <button onClick={handleStop} className="stop-button">停止</button>
+                    ) : (
+                        <button onClick={handleSend}>发送</button>
+                    )}
+                </div>
             </div>
         </div>
     );
