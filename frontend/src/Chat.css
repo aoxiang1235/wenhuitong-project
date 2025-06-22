@@ -1,0 +1,216 @@
+.chat-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    width: 100%;
+    max-width: 800px;
+    margin: 0 auto;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    font-family: sans-serif;
+    padding: 20px;
+}
+
+.chat-window {
+    flex-grow: 1;
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background-color: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+
+.message {
+    padding: 10px 15px;
+    border-radius: 8px;
+    max-width: 80%;
+    word-wrap: break-word;
+    margin-bottom: 15px;
+}
+
+.message.user {
+    background-color: #007bff;
+    color: white;
+    align-self: flex-end;
+    margin-left: auto;
+}
+
+.message.bot {
+    background-color: white;
+    border: 1px solid #ddd;
+    color: #333;
+    align-self: flex-start;
+}
+
+.token-stats {
+    padding: 10px 15px;
+    font-size: 14px;
+    color: #666;
+    background-color: #e8f4fd;
+    border-top: 1px solid #bee5eb;
+    text-align: center;
+    font-family: monospace;
+    border-radius: 6px;
+    margin-bottom: 15px;
+}
+
+.controls {
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-top: 1px solid #ccc;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    border-radius: 8px;
+}
+
+.controls label {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.chat-input {
+    display: flex;
+    gap: 10px;
+}
+
+.chat-input input {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 16px;
+}
+
+.chat-input button {
+    padding: 10px 20px;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+.chat-input button:hover {
+    background: #0056b3;
+}
+
+.chat-input button:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+.stop-button {
+    background: #dc3545 !important;
+}
+
+.stop-button:hover {
+    background: #c82333 !important;
+}
+
+.welcome-message {
+    text-align: center;
+    color: #666;
+    font-style: italic;
+    padding: 20px;
+    background-color: #f0f0f0;
+    border-radius: 8px;
+    margin: 20px 0;
+}
+
+/* 流式实时统计样式 */
+.token-stats.streaming {
+    background-color: #fff3cd;
+    border-color: #ffeaa7;
+    animation: pulse 2s infinite;
+}
+
+.token-stats .stats-content {
+    font-size: 12px;
+    color: #333;
+    font-family: monospace;
+    text-align: center;
+    padding: 4px 0;
+    font-weight: 500;
+    margin-bottom: 5px;
+}
+
+.token-stats .stats-note {
+    font-size: 10px;
+    color: #666;
+    text-align: center;
+    padding: 2px 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.pulse {
+    color: #ffc107;
+    animation: pulse 1s infinite;
+}
+
+.estimate-icon {
+    color: #17a2b8;
+    font-size: 12px;
+}
+
+.official-icon {
+    color: #28a745;
+    font-size: 12px;
+}
+
+.method-badge {
+    background-color: #6c757d;
+    color: white;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 12px;
+    font-weight: 500;
+}
+
+.method-badge.simple {
+    background-color: #fd7e14;
+}
+
+.token-method-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.token-method-selector label {
+    font-size: 14px;
+    color: #333;
+    margin: 0;
+}
+
+.token-method-selector select {
+    padding: 4px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 12px;
+    background: white;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+@keyframes pulse-border {
+    0% { border-top-color: #2196f3; }
+    50% { border-top-color: #64b5f6; }
+    100% { border-top-color: #2196f3; }
+} 

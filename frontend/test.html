@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>前端测试页面</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <h1>前端服务测试</h1>
+    
+    <div class="test-section">
+        <h3>1. 基础连接测试</h3>
+        <div id="connection-test">测试中...</div>
+    </div>
+    
+    <div class="test-section">
+        <h3>2. React应用测试</h3>
+        <div id="react-test">测试中...</div>
+    </div>
+    
+    <div class="test-section">
+        <h3>3. 依赖包测试</h3>
+        <div id="deps-test">测试中...</div>
+    </div>
+    
+    <div class="test-section">
+        <h3>4. API连接测试</h3>
+        <div id="api-test">测试中...</div>
+    </div>
+
+    <script>
+        // 1. 基础连接测试
+        fetch('/')
+            .then(response => {
+                document.getElementById('connection-test').innerHTML = 
+                    '<span class="success">✅ 前端服务正常 (状态码: ' + response.status + ')</span>';
+            })
+            .catch(error => {
+                document.getElementById('connection-test').innerHTML = 
+                    '<span class="error">❌ 前端服务异常: ' + error.message + '</span>';
+            });
+
+        // 2. React应用测试
+        fetch('/src/main.jsx')
+            .then(response => {
+                if (response.ok) {
+                    document.getElementById('react-test').innerHTML = 
+                        '<span class="success">✅ React应用文件可访问</span>';
+                } else {
+                    document.getElementById('react-test').innerHTML = 
+                        '<span class="error">❌ React应用文件不可访问</span>';
+                }
+            })
+            .catch(error => {
+                document.getElementById('react-test').innerHTML = 
+                    '<span class="error">❌ React应用测试失败: ' + error.message + '</span>';
+            });
+
+        // 3. 依赖包测试
+        Promise.all([
+            fetch('/node_modules/.vite/deps/react.js'),
+            fetch('/node_modules/.vite/deps/js-tiktoken.js'),
+            fetch('/node_modules/.vite/deps/@microsoft_fetch-event-source.js')
+        ]).then(responses => {
+            const allOk = responses.every(r => r.ok);
+            document.getElementById('deps-test').innerHTML = 
+                allOk ? '<span class="success">✅ 所有依赖包正常</span>' : 
+                       '<span class="error">❌ 部分依赖包异常</span>';
+        }).catch(error => {
+            document.getElementById('deps-test').innerHTML = 
+                '<span class="error">❌ 依赖包测试失败: ' + error.message + '</span>';
+        });
+
+        // 4. API连接测试
+        fetch('http://localhost:8000/api/chat/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: '测试', use_streaming: false })
+        }).then(response => {
+            if (response.ok) {
+                document.getElementById('api-test').innerHTML = 
+                    '<span class="success">✅ 后端API连接正常</span>';
+            } else {
+                document.getElementById('api-test').innerHTML = 
+                    '<span class="error">❌ 后端API连接异常 (状态码: ' + response.status + ')</span>';
+            }
+        }).catch(error => {
+            document.getElementById('api-test').innerHTML = 
+                '<span class="error">❌ 后端API连接失败: ' + error.message + '</span>';
+        });
+    </script>
+</body>
+</html> 
