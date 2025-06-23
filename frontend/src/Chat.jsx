@@ -1,63 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
+import ReactMarkdown from 'react-markdown';
 import './Chat.css';
-
-// 动态导入js-tiktoken，避免构建时错误
-let encoding_for_model = null;
-let tiktokenAvailable = false;
-
-// 尝试初始化tiktoken
-const initTiktoken = async () => {
-    try {
-        const tiktoken = await import('js-tiktoken');
-        encoding_for_model = tiktoken.encoding_for_model;
-        tiktokenAvailable = true;
-        console.log('js-tiktoken initialized successfully');
-    } catch (error) {
-        console.warn('js-tiktoken not available, falling back to simple estimation:', error);
-        tiktokenAvailable = false;
-    }
-};
 
 const Chat = () => {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [isStreaming, setIsStreaming] = useState(false);
     const [useStreaming, setUseStreaming] = useState(true);
-    const [useTokenCounting, setUseTokenCounting] = useState(true);
     const [tokenStats, setTokenStats] = useState(null);
     const chatWindowRef = useRef(null);
     const abortControllerRef = useRef(null);
-    const encoderRef = useRef(null);
     const [sessionTopic, setSessionTopic] = useState('');
     const topicRequestId = useRef(0);
     const [sessions, setSessions] = useState([]); // 历史会话
     const [currentSessionId, setCurrentSessionId] = useState(Date.now());
-
-    // 初始化js-tiktoken编码器
-    useEffect(() => {
-        initTiktoken().then(() => {
-            if (tiktokenAvailable && encoding_for_model) {
-                try {
-                    encoderRef.current = encoding_for_model('qwen');
-                    console.log('TikToken encoder initialized');
-                } catch (error) {
-                    console.warn('Failed to initialize TikToken encoder:', error);
-                    tiktokenAvailable = false;
-                }
-            }
-        });
-        
-        return () => {
-            if (encoderRef.current) {
-                try {
-                    encoderRef.current.free();
-                } catch (error) {
-                    console.warn('Error freeing encoder:', error);
-                }
-            }
-        };
-    }, []);
 
     const scrollToBottom = () => {
         if (chatWindowRef.current) {
@@ -123,8 +80,7 @@ const Chat = () => {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ 
                             message: currentInput, 
-                            use_streaming: true,
-                            use_token_counting: useTokenCounting
+                            use_streaming: true
                         }),
                         signal: abortControllerRef.current.signal,
                         onopen: async (response) => {
@@ -173,8 +129,7 @@ const Chat = () => {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ 
                             message: currentInput, 
-                            use_streaming: false,
-                            use_token_counting: useTokenCounting
+                            use_streaming: false
                         }),
                     });
 
@@ -218,8 +173,8 @@ const Chat = () => {
 
     // 新建会话函数
     const handleNewSession = () => {
-        // 保存当前会话
-        if (messages.length > 0 || sessionTopic) {
+        // 仅当当前会话有内容且未在sessions中时才保存，防止重复
+        if ((messages.length > 0 || sessionTopic) && !sessions.some(s => s.id === currentSessionId)) {
             setSessions(prev => [
                 ...prev,
                 {
@@ -263,18 +218,40 @@ const Chat = () => {
         setSessions(prev => prev.filter(s => s.id !== id));
     };
 
+    // 加载本地历史会话
+    useEffect(() => {
+        const saved = localStorage.getItem('chat_sessions');
+        if (saved) {
+            setSessions(JSON.parse(saved));
+        }
+    }, []);
+
+    // sessions变化时写入本地
+    useEffect(() => {
+        localStorage.setItem('chat_sessions', JSON.stringify(sessions));
+    }, [sessions]);
+
+    // 清空历史会话
+    const handleClearHistory = () => {
+        setSessions([]);
+        localStorage.removeItem('chat_sessions');
+    };
+
     return (
         <div style={{ display: 'flex' }}>
             {/* 左侧会话栏 */}
             <div className="sidebar">
+                <div style={{textAlign: 'center', marginBottom: 12}}>
+                    <button className="clear-history-btn" onClick={handleClearHistory}>清空历史</button>
+                </div>
                 {sessions.map(session => (
                     <div
                         key={session.id}
                         className={`session-item${session.id === currentSessionId ? ' active' : ''}`}
                         onClick={() => handleSwitchSession(session.id)}
-                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                        style={{ display: 'flex', alignItems: 'float', justifyContent: 'space-between' }}
                     >
-                        <span>{session.topic}</span>
+                        <span>{session.topic.replace(/^主题：/, '')}</span>
                         <button
                             className="delete-session-btn"
                             onClick={e => handleDeleteSession(session.id, e)}
@@ -290,7 +267,7 @@ const Chat = () => {
                     <button className="new-session-btn" onClick={handleNewSession}>新建会话</button>
                 </div>
                 {sessionTopic && (
-                    <div className="session-topic">主题：{sessionTopic}</div>
+                    <div className="session-topic">{sessionTopic.replace(/^主题：/, '')}</div>
                 )}
                 {/* 新增总token统计 */}
                 <div className="total-tokens">
@@ -309,7 +286,11 @@ const Chat = () => {
                     {messages.map((msg, index) => (
                         <div key={index} className={`message-wrapper`}>
                             <div className={`message ${msg.sender}`}>
-                                {msg.text}
+                                {msg.sender === 'bot' ? (
+                                    <ReactMarkdown>{msg.text}</ReactMarkdown>
+                                ) : (
+                                    msg.text
+                                )}
                             </div>
                             <div className="msg-meta">
                                 {msg.timestamp && (
